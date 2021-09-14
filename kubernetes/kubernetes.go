@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 
@@ -61,6 +62,24 @@ func (k *K8s) GetNodeCondition(nodeName string) []core.NodeCondition {
 	return node.Status.Conditions
 }
 
+func (k *K8s) GetNodeConditions(nodeName string) ([]core.NodeCondition, error) {
+	if freshNode, err := k.getNode(nodeName); err != nil {
+		return nil, err
+	} else {
+		return freshNode.Status.Conditions, nil
+	}
+}
+func (k *K8s) getNode(nodeName string) (*core.Node, error) {
+	freshNode, err := k.clientset.CoreV1().Nodes().Get(context.TODO(), nodeName, meta.GetOptions{})
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return nil, err
+		}
+		return nil, err
+	}
+	return freshNode, nil
+}
+
 func (k *K8s) ChangeNodeCondition(nodeName string, conds []core.NodeCondition) (err error) {
 	// Refresh the node object
 	freshNode, err := k.clientset.CoreV1().Nodes().Get(context.TODO(), nodeName, meta.GetOptions{})
@@ -98,4 +117,22 @@ func (k *K8s) ChangeNodeCondition(nodeName string, conds []core.NodeCondition) (
 		return err
 	}
 	return nil
+}
+
+type patchConditionValue struct {
+	Op    string               `json:"op"`
+	Path  string               `json:"path"`
+	Value []core.NodeCondition `json:"value"`
+}
+
+func (k *K8s) PatchNodeStatus(nodeName string, conditions []core.NodeCondition) {
+	data := &[]patchConditionValue{{
+		Op:    "replace",
+		Path:  "/",
+		Value: conditions,
+	}}
+
+	if payload, err := json.Marshal(data); err == nil {
+		k.clientset.CoreV1().Nodes().PatchStatus(context.TODO(), nodeName, payload)
+	}
 }
