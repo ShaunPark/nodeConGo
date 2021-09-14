@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -76,6 +77,7 @@ func delete() {
 			if condition.Type == core.NodeConditionType(*conditionType) {
 				hasCondition = true
 			} else {
+				fmt.Printf("%s", condition.Type)
 				newConditions = append(newConditions, condition)
 			}
 		}
