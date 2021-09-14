@@ -62,7 +62,7 @@ func delete() {
 	log, err := zap.NewProduction()
 	kingpin.FatalIfError(err, "cannot create log")
 
-	if !containStr(inValidConditions, *conditionType) {
+	if containStr(inValidConditions, *conditionType) {
 		kingpin.FatalUsage("Delete condition '%s' is not allowed.", *conditionType)
 	}
 
