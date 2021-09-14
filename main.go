@@ -15,12 +15,76 @@ var (
 	kubecfg   = kingpin.Flag("kubeconfig", "Path to kubeconfig file. Leave unset to use in-cluster config.").String()
 	apiserver = kingpin.Flag("master", "Address of Kubernetes API server. Leave unset to use in-cluster config.").String()
 
-	nodeName      = kingpin.Flag("nodename", "node name to change condition").Short('n').Required().String()
-	status        = kingpin.Flag("status", "condition type").Short('s').Required().String()
+	changeCommand = kingpin.Command("change", "Change Condition Status")
+	deleteCommand = kingpin.Command("delete", "Delete Condition")
+
 	conditionType = kingpin.Flag("condition", "(Optional) Omit if you want to change all conditions except 'Ready'").Short('t').String()
-	message       = kingpin.Flag("message", "(Optional) Message of status").Short('m').String()
-	validStatus   = []core.ConditionStatus{core.ConditionFalse, core.ConditionTrue}
+	nodeName      = kingpin.Flag("nodename", "node name to change condition").Short('n').Required().String()
+
+	status  = changeCommand.Flag("status", "condition type").Short('s').Required().String()
+	message = changeCommand.Flag("message", "(Optional) Message of status").Short('m').String()
+
+	validStatus       = []core.ConditionStatus{core.ConditionFalse, core.ConditionTrue}
+	inValidConditions = []string{"Ready", "KernelDeadLock", "CorruptDockerOverlay2", "ReadonlyFilesystem", "NetworkUnavailable", "DiskPressure", "MemoryPressure", "PIDPressure", "EFSConnectFail"}
 )
+
+func main() {
+
+	switch kingpin.Parse() {
+	case changeCommand.FullCommand():
+		change()
+	case deleteCommand.FullCommand():
+		delete()
+	}
+}
+
+func change() {
+	log, err := zap.NewProduction()
+	kingpin.FatalIfError(err, "cannot create log")
+
+	_status := core.ConditionStatus(*status)
+	_conditionType := core.NodeConditionType(*conditionType)
+
+	if !contains(validStatus, *status) {
+		kingpin.FatalUsage("Invalid status %s. Only 'True' and 'False' are avaliable", *status)
+	}
+	if _status == core.ConditionTrue && len(_conditionType) == 0 {
+		kingpin.FatalUsage("Changing all conditions to 'True' is not allowed")
+	}
+	if _status == core.ConditionFalse && _conditionType == "Ready" {
+		kingpin.FatalUsage("Changing the status of 'Ready' condition to 'False' is not allowed.")
+	}
+
+	do(*nodeName, _status, _conditionType, *message, log)
+}
+
+func delete() {
+	log, err := zap.NewProduction()
+	kingpin.FatalIfError(err, "cannot create log")
+
+	if !containStr(inValidConditions, *conditionType) {
+		kingpin.FatalUsage("Delete condition '%s' is not allowed.", *conditionType)
+	}
+
+	k := kubernetes.NewClient(log, apiserver, kubecfg)
+
+	hasCondition := false
+	if conditions, err := k.GetNodeConditions(*nodeName); err == nil {
+		newConditions := make([]core.NodeCondition, 0)
+
+		for _, condition := range conditions {
+			if condition.Type == core.NodeConditionType(*conditionType) {
+				hasCondition = true
+			} else {
+				newConditions = append(newConditions, condition)
+			}
+		}
+
+		if hasCondition {
+			k.PatchNodeStatus(*nodeName, newConditions)
+		}
+	}
+}
 
 var _okMessage = map[string]string{
 	"KernelDeadLock":        "kernel has no deadlock",
@@ -36,6 +100,15 @@ var _okMessage = map[string]string{
 func contains(s []core.ConditionStatus, substr string) bool {
 	for _, v := range s {
 		if v == core.ConditionStatus(substr) {
+			return true
+		}
+	}
+	return false
+}
+
+func containStr(s []string, substr string) bool {
+	for _, v := range s {
+		if v == substr {
 			return true
 		}
 	}
@@ -108,25 +181,4 @@ func do(nodeName string, status core.ConditionStatus, conditionType core.NodeCon
 	if err := k.ChangeNodeCondition(nodeName, filtered); err != nil {
 		log.Error(err.Error())
 	}
-}
-
-func main() {
-	kingpin.Parse()
-	log, err := zap.NewProduction()
-	kingpin.FatalIfError(err, "cannot create log")
-
-	_status := core.ConditionStatus(*status)
-	_conditionType := core.NodeConditionType(*conditionType)
-
-	if !contains(validStatus, *status) {
-		kingpin.FatalUsage("Invalid status %s. Only 'True' and 'False' are avaliable", *status)
-	}
-	if _status == core.ConditionTrue && len(_conditionType) == 0 {
-		kingpin.FatalUsage("Changing all conditions to 'True' is not allowed")
-	}
-	if _status == core.ConditionFalse && _conditionType == "Ready" {
-		kingpin.FatalUsage("Changing the status of 'Ready' condition to 'False' is not allowed.")
-	}
-
-	do(*nodeName, _status, _conditionType, *message, log)
 }
