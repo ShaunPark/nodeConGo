@@ -8,6 +8,6 @@ require (
 	go.uber.org/zap v1.19.0 // indirect
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6 // indirect
 	k8s.io/api v0.22.0 // indirect
-	k8s.io/apimachinery v0.22.0 // indirect
+	k8s.io/apimachinery v0.22.1 // indirect
 	k8s.io/client-go v0.22.0 // indirect
 )
