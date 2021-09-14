@@ -77,7 +77,7 @@ func delete() {
 			if condition.Type == core.NodeConditionType(*conditionType) {
 				hasCondition = true
 			} else {
-				fmt.Printf("%s", condition.Type)
+				fmt.Printf("%s\n", condition.Type)
 				newConditions = append(newConditions, condition)
 			}
 		}

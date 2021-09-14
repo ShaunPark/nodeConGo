@@ -128,7 +128,7 @@ type patchConditionValue struct {
 func (k *K8s) PatchNodeStatus(nodeName string, conditions []core.NodeCondition) {
 	data := &[]patchConditionValue{{
 		Op:    "replace",
-		Path:  "/",
+		Path:  "/conditions",
 		Value: conditions,
 	}}
 
