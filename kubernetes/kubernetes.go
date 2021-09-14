@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -11,8 +12,11 @@ import (
 	"gopkg.in/alecthomas/kingpin.v2"
 
 	core "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	client "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -125,14 +129,48 @@ type patchConditionValue struct {
 	Value []core.NodeCondition `json:"value"`
 }
 
-func (k *K8s) PatchNodeStatus(nodeName string, conditions []core.NodeCondition) {
-	data := &[]patchConditionValue{{
-		Op:    "replace",
-		Path:  "/conditions",
-		Value: conditions,
-	}}
+// func (k *K8s) PatchNodeStatus(nodeName string, conditions []core.NodeCondition) {
+// 	data := &[]patchConditionValue{{
+// 		Op:    "replace",
+// 		Path:  "/conditions",
+// 		Value: conditions,
+// 	}}
 
-	if payload, err := json.Marshal(data); err == nil {
-		k.clientset.CoreV1().Nodes().PatchStatus(context.TODO(), nodeName, payload)
+// 	if payload, err := json.Marshal(data); err == nil {
+// 		k.clientset.CoreV1().Nodes().PatchStatus(context.TODO(), nodeName, payload)
+// 		k.clientset.CoreV1().Nodes().PatchStatus()
+// 	}
+// }
+
+func (k *K8s) PatchNodeStatus(nodeName string, conditions []core.NodeCondition) {
+	oldNode, err := k.getNode(nodeName)
+	if err != nil {
+		fmt.Printf("failed to marshal old node %#v for node %q: %v", oldNode, nodeName, err)
+	}
+
+	oldData, err := json.Marshal(oldNode)
+	if err != nil {
+		fmt.Printf("failed to marshal old node %#v for node %q: %v", oldNode, nodeName, err)
+	}
+
+	// Reset spec to make sure only patch for Status or ObjectMeta is generated.
+	// Note that we don't reset ObjectMeta here, because:
+	// 1. This aligns with Nodes().UpdateStatus().
+	// 2. Some component does use this to update node annotations.
+	oldNode.Status.Conditions = conditions
+
+	newData, err := json.Marshal(oldNode)
+	if err != nil {
+		fmt.Printf("failed to marshal new node %#v for node %q: %v", oldNode, nodeName, err)
+	}
+
+	patchBytes, err := strategicpatch.CreateTwoWayMergePatch(oldData, newData, v1.Node{})
+	if err != nil {
+		fmt.Printf("failed to create patch for node %q: %v", nodeName, err)
+	}
+
+	_, err = k.clientset.CoreV1().Nodes().Patch(context.TODO(), nodeName, types.StrategicMergePatchType, patchBytes, meta.PatchOptions{})
+	if err != nil {
+		fmt.Printf("failed to patch status %q for node %q: %v", patchBytes, nodeName, err)
 	}
 }
