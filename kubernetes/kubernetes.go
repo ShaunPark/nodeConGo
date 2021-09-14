@@ -169,6 +169,8 @@ func (k *K8s) PatchNodeStatus(nodeName string, conditions []core.NodeCondition) 
 		fmt.Printf("failed to create patch for node %q: %v", nodeName, err)
 	}
 
+	fmt.Printf("%s", string(patchBytes))
+
 	_, err = k.clientset.CoreV1().Nodes().Patch(context.TODO(), nodeName, types.StrategicMergePatchType, patchBytes, meta.PatchOptions{})
 	if err != nil {
 		fmt.Printf("failed to patch status %q for node %q: %v", patchBytes, nodeName, err)
