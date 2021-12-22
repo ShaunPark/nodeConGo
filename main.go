@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -26,7 +25,7 @@ var (
 	message = changeCommand.Flag("message", "(Optional) Message of status").Short('m').String()
 
 	validStatus       = []core.ConditionStatus{core.ConditionFalse, core.ConditionTrue}
-	inValidConditions = []string{"Ready", "KernelDeadLock", "CorruptDockerOverlay2", "ReadonlyFilesystem", "NetworkUnavailable", "DiskPressure", "MemoryPressure", "PIDPressure", "EFSConnectFail"}
+	inValidConditions = []string{"Ready", "NetworkUnavailable", "DiskPressure", "MemoryPressure", "PIDPressure"}
 )
 
 func main() {
@@ -68,24 +67,7 @@ func delete() {
 	}
 
 	k := kubernetes.NewClient(log, apiserver, kubecfg)
-
-	hasCondition := false
-	if conditions, err := k.GetNodeConditions(*nodeName); err == nil {
-		newConditions := make([]core.NodeCondition, 0)
-
-		for _, condition := range conditions {
-			if condition.Type == core.NodeConditionType(*conditionType) {
-				hasCondition = true
-			} else {
-				fmt.Printf("%s\n", condition.Type)
-				newConditions = append(newConditions, condition)
-			}
-		}
-
-		if hasCondition {
-			k.PatchNodeStatus(*nodeName, newConditions)
-		}
-	}
+	k.DeleteNodeCondition(*nodeName, *conditionType)
 }
 
 var _okMessage = map[string]string{

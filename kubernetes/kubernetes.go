@@ -2,7 +2,6 @@ package kubernetes
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,11 +11,8 @@ import (
 	"gopkg.in/alecthomas/kingpin.v2"
 
 	core "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	meta "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	client "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -66,13 +62,14 @@ func (k *K8s) GetNodeCondition(nodeName string) []core.NodeCondition {
 	return node.Status.Conditions
 }
 
-func (k *K8s) GetNodeConditions(nodeName string) ([]core.NodeCondition, error) {
+func (k *K8s) GetNodeStatus(nodeName string) (*core.NodeStatus, error) {
 	if freshNode, err := k.getNode(nodeName); err != nil {
 		return nil, err
 	} else {
-		return freshNode.Status.Conditions, nil
+		return &freshNode.Status, nil
 	}
 }
+
 func (k *K8s) getNode(nodeName string) (*core.Node, error) {
 	freshNode, err := k.clientset.CoreV1().Nodes().Get(context.TODO(), nodeName, meta.GetOptions{})
 	if err != nil {
@@ -123,56 +120,70 @@ func (k *K8s) ChangeNodeCondition(nodeName string, conds []core.NodeCondition) (
 	return nil
 }
 
-type patchConditionValue struct {
-	Op    string               `json:"op"`
-	Path  string               `json:"path"`
-	Value []core.NodeCondition `json:"value"`
+// type patchConditionValue struct {
+// 	Op    string               `json:"op"`
+// 	Path  string               `json:"path"`
+// 	Value []core.NodeCondition `json:"value"`
+// }
+
+func (k *K8s) DeleteNodeCondition(nodeName string, conditionType string) {
+	freshNode, err := k.clientset.CoreV1().Nodes().Get(context.TODO(), nodeName, meta.GetOptions{})
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return
+		}
+		return
+	}
+
+	newConditions := make([]core.NodeCondition, 0)
+	hasCondition := false
+
+	for _, condition := range freshNode.Status.Conditions {
+		if condition.Type == core.NodeConditionType(conditionType) {
+			hasCondition = true
+		} else {
+			fmt.Printf("%s\n", condition.Type)
+			newConditions = append(newConditions, condition)
+		}
+	}
+	freshNode.Status.Conditions = newConditions
+
+	if hasCondition {
+		k.clientset.CoreV1().Nodes().UpdateStatus(context.TODO(), freshNode, meta.UpdateOptions{})
+	}
 }
 
 // func (k *K8s) PatchNodeStatus(nodeName string, conditions []core.NodeCondition) {
-// 	data := &[]patchConditionValue{{
-// 		Op:    "replace",
-// 		Path:  "/conditions",
-// 		Value: conditions,
-// 	}}
+// 	oldNode, err := k.getNode(nodeName)
+// 	if err != nil {
+// 		fmt.Printf("failed to marshal old node %#v for node %q: %v", oldNode, nodeName, err)
+// 	}
 
-// 	if payload, err := json.Marshal(data); err == nil {
-// 		k.clientset.CoreV1().Nodes().PatchStatus(context.TODO(), nodeName, payload)
-// 		k.clientset.CoreV1().Nodes().PatchStatus()
+// 	oldData, err := json.Marshal(oldNode)
+// 	if err != nil {
+// 		fmt.Printf("failed to marshal old node %#v for node %q: %v", oldNode, nodeName, err)
+// 	}
+
+// 	// Reset spec to make sure only patch for Status or ObjectMeta is generated.
+// 	// Note that we don't reset ObjectMeta here, because:
+// 	// 1. This aligns with Nodes().UpdateStatus().
+// 	// 2. Some component does use this to update node annotations.
+// 	oldNode.Status.Conditions = conditions
+
+// 	newData, err := json.Marshal(oldNode)
+// 	if err != nil {
+// 		fmt.Printf("failed to marshal new node %#v for node %q: %v", oldNode, nodeName, err)
+// 	}
+
+// 	patchBytes, err := strategicpatch.CreateTwoWayMergePatch(oldData, newData, core.Node{})
+// 	if err != nil {
+// 		fmt.Printf("failed to create patch for node %q: %v", nodeName, err)
+// 	}
+
+// 	fmt.Printf("%s", string(patchBytes))
+
+// 	_, err = k.clientset.CoreV1().Nodes().Patch(context.TODO(), nodeName, types.StrategicMergePatchType, patchBytes, meta.PatchOptions{})
+// 	if err != nil {
+// 		fmt.Printf("failed to patch status %q for node %q: %v", patchBytes, nodeName, err)
 // 	}
 // }
-
-func (k *K8s) PatchNodeStatus(nodeName string, conditions []core.NodeCondition) {
-	oldNode, err := k.getNode(nodeName)
-	if err != nil {
-		fmt.Printf("failed to marshal old node %#v for node %q: %v", oldNode, nodeName, err)
-	}
-
-	oldData, err := json.Marshal(oldNode)
-	if err != nil {
-		fmt.Printf("failed to marshal old node %#v for node %q: %v", oldNode, nodeName, err)
-	}
-
-	// Reset spec to make sure only patch for Status or ObjectMeta is generated.
-	// Note that we don't reset ObjectMeta here, because:
-	// 1. This aligns with Nodes().UpdateStatus().
-	// 2. Some component does use this to update node annotations.
-	oldNode.Status.Conditions = conditions
-
-	newData, err := json.Marshal(oldNode)
-	if err != nil {
-		fmt.Printf("failed to marshal new node %#v for node %q: %v", oldNode, nodeName, err)
-	}
-
-	patchBytes, err := strategicpatch.CreateTwoWayMergePatch(oldData, newData, v1.Node{})
-	if err != nil {
-		fmt.Printf("failed to create patch for node %q: %v", nodeName, err)
-	}
-
-	fmt.Printf("%s", string(patchBytes))
-
-	_, err = k.clientset.CoreV1().Nodes().Patch(context.TODO(), nodeName, types.StrategicMergePatchType, patchBytes, meta.PatchOptions{})
-	if err != nil {
-		fmt.Printf("failed to patch status %q for node %q: %v", patchBytes, nodeName, err)
-	}
-}
